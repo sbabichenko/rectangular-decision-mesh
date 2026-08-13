@@ -215,10 +215,7 @@ def cand_stats(col, r, w, tau=TAU, parent_var=0.0):
 
 
 def seed_uniform(mesh, levels=3):
-    """Unthresholded coarse base mesh (2^levels x 2^levels), promoted
-    without gate decisions — the port of the triangular pipeline's
-    'deliberately unthresholded coarse mesh is one statistical model'
-    (core/pipeline.cpp): the gate governs refinements beyond it."""
+    """Uniform unthresholded base mesh (kept for reference runs)."""
     for _ in range(levels):
         for leaf in list(mesh.leaves):
             mesh.split(leaf, "x", origin="seed")
@@ -229,10 +226,62 @@ def seed_uniform(mesh, levels=3):
             mesh.promote(k)
 
 
+SEED_SPLITS = 96
+SEED_REFIT_EVERY = 10
+
+
+def seed_adaptive(mesh, xs, ys, nn, kk):
+    """Stage-wise adaptive unthresholded coarse phase — the closer
+    analogue of the production coarse stage than a uniform grid: coarse
+    resolution is grown greedily where the (weighted working) misfit
+    is, with both axes competing, no gate decisions, and periodic
+    global refits. The gate governs refinements beyond this stage."""
+    taus, svv = fit_binom_em(mesh, xs, ys, nn, kk)
+    for i in range(SEED_SPLITS):
+        pred = np.array([mesh.eval(a, b) for a, b in zip(xs, ys)])
+        p = expit(pred)
+        w = np.maximum(nn * p * (1 - p), 1e-8)
+        r = (kk - nn * p) / w
+        best = None
+        for leaf in mesh.leaves:
+            # the coarse stage stays coarse: no seed cell finer than the
+            # 16x16 scale (the gate owns refinement beyond it)
+            if leaf.lx + leaf.ly >= 8:
+                continue
+            xlo = (xs * S >= leaf.x0) if leaf.x0 == 0 else (xs * S > leaf.x0)
+            ylo = (ys * S >= leaf.y0) if leaf.y0 == 0 else (ys * S > leaf.y0)
+            inside = xlo & (xs * S <= leaf.x1) & ylo & (ys * S <= leaf.y1)
+            if inside.sum() < MIN_PTS:
+                continue
+            u = (xs[inside] * S - leaf.x0) / (leaf.x1 - leaf.x0)
+            v = (ys[inside] * S - leaf.y0) / (leaf.y1 - leaf.y0)
+            wi, ri = w[inside], r[inside]
+            for axis in ("x", "y"):
+                tent = 1 - np.abs(2 * (u if axis == "x" else v) - 1)
+                other = v if axis == "x" else u
+                Xc = np.column_stack([tent * (1 - other), tent * other])
+                A = (Xc * wi[:, None]).T @ Xc + 1e-10 * np.eye(2)
+                bb = (Xc * wi[:, None]).T @ ri
+                gain = float(bb @ np.linalg.solve(A, bb))
+                if best is None or gain > best[0]:
+                    best = (gain, leaf, axis)
+        if best is None or best[0] <= 0:
+            break
+        _, leaf, axis = best
+        d = leaf.lx + leaf.ly + 1
+        mesh.split(leaf, axis, origin="seed")
+        for key, vx in list(mesh.verts.items()):
+            if vx.depth == d and vx.state in ("weld", "hanging") \
+                    and vx.birth_origin == "seed":
+                mesh.promote(key)
+        if (i + 1) % SEED_REFIT_EVERY == 0:
+            taus, svv = fit_binom_em(mesh, xs, ys, nn, kk)
+    return fit_binom_em(mesh, xs, ys, nn, kk)
+
+
 def run_gate_w(xs, ys, nn, kk):
     mesh = RectMesh()
-    seed_uniform(mesh, levels=4)
-    taus, svv = fit_binom_em(mesh, xs, ys, nn, kk)
+    taus, svv = seed_adaptive(mesh, xs, ys, nn, kk)
 
     def parent_var(pkeys):
         return sum(svv.get(pk, 0.0) for pk in pkeys)
@@ -247,9 +296,17 @@ def run_gate_w(xs, ys, nn, kk):
         ws = np.maximum(nn * p_cur * (1 - p_cur), 1e-8)
         r = (kk - nn * p_cur) / ws
         cands = {}
+
+        def leaf_inside(lf):
+            # lower edges inclusive at the domain boundary so wala=0 /
+            # wac-floor pools are not excluded from scoring
+            xlo = (xs * S >= lf.x0) if lf.x0 == 0 else (xs * S > lf.x0)
+            ylo = (ys * S >= lf.y0) if lf.y0 == 0 else (ys * S > lf.y0)
+            return xlo & (xs * S <= lf.x1) & ylo & (ys * S <= lf.y1)
+
+        leaf_by_box = {(lf.x0, lf.y0, lf.x1, lf.y1): lf for lf in mesh.leaves}
         for leaf in mesh.leaves:
-            inside = ((xs * S > leaf.x0) & (xs * S <= leaf.x1)
-                      & (ys * S > leaf.y0) & (ys * S <= leaf.y1))
+            inside = leaf_inside(leaf)
             if inside.sum() < MIN_PTS:
                 continue
             u = (xs[inside] * S - leaf.x0) / (leaf.x1 - leaf.x0)
@@ -269,7 +326,40 @@ def run_gate_w(xs, ys, nn, kk):
                         pkeys = [(leaf.x0, pos[1]), (leaf.x1, pos[1])]
                     else:
                         pkeys = [(pos[0], leaf.y0), (pos[0], leaf.y1)]
-                    st = cand_stats(tent * trans, r[inside], ws[inside],
+                    # Two-sided column: the post-move coefficient's hat
+                    # spans BOTH sides of the subdivided edge (the release
+                    # split is part of the composite move). Include the
+                    # mirrored transverse tent from a same-size neighbor;
+                    # one-sided scoring understates z by ~sqrt(2).
+                    cols = [tent * trans]
+                    rs_ = [r[inside]]
+                    ws_ = [ws[inside]]
+                    if axis == "x":
+                        nb_box = ((leaf.x0, 2 * leaf.y0 - leaf.y1,
+                                   leaf.x1, leaf.y0) if end == 0 else
+                                  (leaf.x0, leaf.y1, leaf.x1,
+                                   2 * leaf.y1 - leaf.y0))
+                    else:
+                        nb_box = ((2 * leaf.x0 - leaf.x1, leaf.y0,
+                                   leaf.x0, leaf.y1) if end == 0 else
+                                  (leaf.x1, leaf.y0,
+                                   2 * leaf.x1 - leaf.x0, leaf.y1))
+                    nb = leaf_by_box.get(nb_box)
+                    if nb is not None:
+                        nin = leaf_inside(nb)
+                        if nin.sum() > 0:
+                            un = (xs[nin] * S - nb.x0) / (nb.x1 - nb.x0)
+                            vn = (ys[nin] * S - nb.y0) / (nb.y1 - nb.y0)
+                            tent_n = 1 - np.abs(
+                                2 * (un if axis == "x" else vn) - 1)
+                            tr_n = ((vn if end == 0 else 1 - vn)
+                                    if axis == "x"
+                                    else (un if end == 0 else 1 - un))
+                            cols.append(tent_n * tr_n)
+                            rs_.append(r[nin])
+                            ws_.append(ws[nin])
+                    st = cand_stats(np.concatenate(cols), np.concatenate(rs_),
+                                    np.concatenate(ws_),
                                     tau_at(taus, leaf.lx + leaf.ly + 1),
                                     parent_var(pkeys))
                     if st is None:
@@ -369,7 +459,7 @@ def run_dataset(fname, tag, title):
             n[hold], k[hold], np.full(int(hold.sum()), rate0)),
         "stack": "binomial IRLS",
         "caveats": "Exact-binomial PoC on a 12k-pool subsample, "
-                   "unthresholded 16x16 coarse seed, per-depth EM tau (floor "
+                   "adaptive unthresholded coarse stage (96 deviance-greedy splits), per-depth EM tau (floor "
                    "0.005), production gate config: Lindsey lfdr family "
                    "decision (sigma0 [0.3,6], pi0>=0.05, BH fallback), 80 "
                    "rounds, GEV=0.35 + 0.25x parent posterior variance in "

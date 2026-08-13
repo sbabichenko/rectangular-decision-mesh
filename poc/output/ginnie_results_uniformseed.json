@@ -1,0 +1,24 @@
+{
+  "cumulative": {
+    "n_pools_subsampled": 12000,
+    "n_train": 8997,
+    "n_heldout": 3003,
+    "n_admitted": 18,
+    "n_leaves": 330,
+    "heldout_deviance_per_pool": 8.007460526191059,
+    "heldout_deviance_per_pool_constant_baseline": 105.68265501219724,
+    "stack": "binomial IRLS",
+    "caveats": "Exact-binomial PoC on a 12k-pool subsample, unthresholded 16x16 coarse seed, per-depth EM tau (floor 0.005), production gate config: Lindsey lfdr family decision (sigma0 [0.3,6], pi0>=0.05, BH fallback), 80 rounds, GEV=0.35 + 0.25x parent posterior variance in the null, keff>=0.5, >=10 fit points, IRLS step cap 4, locally balanced holdout; no pool effects in the fit, no law machinery."
+  },
+  "smm": {
+    "n_pools_subsampled": 12000,
+    "n_train": 8999,
+    "n_heldout": 3001,
+    "n_admitted": 0,
+    "n_leaves": 256,
+    "heldout_deviance_per_pool": 1.1615859998189357,
+    "heldout_deviance_per_pool_constant_baseline": 1.6604337296624394,
+    "stack": "binomial IRLS",
+    "caveats": "Exact-binomial PoC on a 12k-pool subsample, unthresholded 16x16 coarse seed, per-depth EM tau (floor 0.005), production gate config: Lindsey lfdr family decision (sigma0 [0.3,6], pi0>=0.05, BH fallback), 80 rounds, GEV=0.35 + 0.25x parent posterior variance in the null, keff>=0.5, >=10 fit points, IRLS step cap 4, locally balanced holdout; no pool effects in the fit, no law machinery."
+  }
+}
