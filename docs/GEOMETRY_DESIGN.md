@@ -146,6 +146,48 @@ must treat species 2 like the triangular repo's contained vertices:
 structurally-zero surpluses are not evidence about tau
 (`ESTIMATOR_LESSONS.md` §2 — they never vote).
 
+## 2b. The inert-split lemma (2026-08-13)
+
+**Lemma.** A dyadic bisection whose chord vertices are all welded
+reproduces the parent cell's bilinear surface exactly.
+
+*Proof sketch.* Bilinear restricted to an edge is linear, so the
+parent surface's value at an edge midpoint is the average of the edge's
+endpoint values — precisely the weld value `(h_a+h_b)/2`. The parent
+bilinear restricted to a child sub-rectangle is itself bilinear, and a
+bilinear function on a rectangle is determined by its four corner
+values, which match by the above. Hence Q1 dyadic refinement is nested
+and a fully-welded split is invisible in function space. (The exact
+analogue of the triangular property that a midpoint at `mu_lin` leaves
+the P1 surface unchanged.)
+
+Consequences:
+
+- **A rectangle "split" by a fully welded chord is equivalent to the
+  unsplit rectangle.** The mesh is well-defined only up to inert
+  splits; the minimal representative (no fully-welded chords) is the
+  canonical one.
+- **Composite moves are "+1 column."** In the hierarchical (surplus)
+  parameterization, ancestors' columns pass through a released vertex
+  with weight 1/2 whether or not it is promoted, and welded byproducts
+  contribute no columns at all. A release split followed by admitting
+  `delta_v` changes the design by exactly one new column; the
+  composite null is a one-coefficient null on the refined geometry,
+  and no other coefficient's column moves. This retroactively
+  simplifies §7.3's honesty obligations.
+- **The only real cost of inert geometry is candidate multiplicity.**
+  New welds and new cuts enlarge the *future* candidate stream; that
+  is a selection-accounting effect, not a fit distortion, and is the
+  single thing the composite-vs-sequential simulation arm needs to
+  measure.
+- **Free coarsening.** If every vertex of a chord is welded (born so,
+  or re-welded when the final cleanup retires its coefficients), the
+  split may be physically deleted. Retirement of geometry joins
+  retirement of coefficients as a first-class operation.
+- **2:1 balance is pure bookkeeping.** Balance-induced splits are
+  inert, so enforcing balance eagerly has zero function-space cost;
+  the policy choice in §3 is about constraint-closure simplicity only.
+
 ## 3. Balance policy: 2:1, enforced, with welded byproducts
 
 Unrestricted level differences let hanging constraints chain (a master
@@ -251,6 +293,11 @@ Settled 2026-08-13:
    this is frozen — the failure mode to measure is topology feedback
    from evidence-free refinement (the containment-exclusion lesson:
    mechanism-sound changes can still lose held-out through the gate).
+   *Sharpened by §2b (inert-split lemma)*: the composite move is
+   exactly one new column in the hierarchical basis; the smuggled
+   geometry is functionally inert, so the simulation arm measures only
+   the candidate-multiplicity effect of the enlarged future candidate
+   stream.
 
 Still open:
 
