@@ -1,0 +1,11 @@
+{
+  "n_pools": 33740,
+  "n_train": 25294,
+  "n_heldout": 8446,
+  "n_admitted": 88,
+  "n_leaves": 475,
+  "n_free": 226,
+  "heldout_deviance_per_pool": 1.674551,
+  "heldout_deviance_per_pool_constant_baseline": 1.961635,
+  "stack": "C++ binomial IRLS, full data"
+}
