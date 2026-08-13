@@ -1,0 +1,47 @@
+{
+  "q_nominal": 0.1,
+  "w0_bh": {
+    "reps": 40,
+    "realized_FDR": 0.0,
+    "mean_admissions": 0.0,
+    "mean_false": 0.0
+  },
+  "w0_ebh": {
+    "reps": 40,
+    "realized_FDR": 0.0,
+    "mean_admissions": 0.0,
+    "mean_false": 0.0
+  },
+  "w1_bh": {
+    "reps": 20,
+    "realized_FDR": 0.12053571428571426,
+    "mean_admissions": 5.05,
+    "mean_false": 0.85,
+    "mean_power": 0.8400000000000001,
+    "false_admission_depths": {
+      "3": 16,
+      "4": 1
+    }
+  },
+  "w1_ebh": {
+    "reps": 20,
+    "realized_FDR": 0.08888888888888888,
+    "mean_admissions": 4.65,
+    "mean_false": 0.6,
+    "mean_power": 0.8100000000000002,
+    "false_admission_depths": {
+      "3": 10,
+      "4": 2
+    }
+  },
+  "w2_bh": {
+    "n_admitted": 238,
+    "n_leaves": 447,
+    "rmse_vs_truth_grid": 0.21049417100205384
+  },
+  "w2_ebh": {
+    "n_admitted": 171,
+    "n_leaves": 298,
+    "rmse_vs_truth_grid": 0.23277319845065123
+  }
+}
