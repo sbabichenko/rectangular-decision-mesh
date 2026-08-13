@@ -1,0 +1,43 @@
+{
+  "lemma": {
+    "grid_n": 96,
+    "n_setup_splits": 10,
+    "n_welded_splits": 6,
+    "max_abs_surface_change": 4.440892098500626e-16
+  },
+  "release": {
+    "n_release_splits": 1,
+    "surface_change_from_release_geometry": 3.3306690738754696e-16,
+    "preexisting_column_change_hierarchical_basis": 2.220446049250313e-16,
+    "preexisting_column_change_nodal_basis": 0.3404467249552595,
+    "new_column_support_fraction_of_domain": 0.5
+  },
+  "fit": {
+    "n_train": 4000,
+    "n_test": 1500,
+    "noise_sd": 0.08,
+    "n_selected_splits": 40,
+    "n_splits_total": 114,
+    "n_balance_splits": 25,
+    "axis_counts": {
+      "x": 53,
+      "y": 61
+    },
+    "n_release_splits": 49,
+    "vertex_states": {
+      "free": 79,
+      "weld": 45,
+      "hanging": 26
+    },
+    "birth_origins": {
+      "root": 4,
+      "selected": 75,
+      "release": 47,
+      "balance": 24
+    },
+    "n_free_coefficients": 79,
+    "train_rmse": 0.08098649523832782,
+    "test_rmse": 0.08244820776912888,
+    "test_rmse_vs_noiseless_truth": 0.02901301419882105
+  }
+}
