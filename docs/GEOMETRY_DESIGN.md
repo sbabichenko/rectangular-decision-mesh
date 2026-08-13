@@ -80,12 +80,16 @@ Consequences to accept explicitly:
   anisotropy turns out to matter statistically, tau can later be
   indexed by `(d, axis)` — the lesson doc's fresh-seed discipline
   applies to that upgrade like any other.
-- **Aspect-ratio cap**: `|lx - ly| <= A` (A = 2 to start, i.e. 4:1
-  physical aspect ratio on a square domain). The cap is a *candidate
-  filter*, not a forced split: a cut that would exceed the cap is
-  simply not offered to the gate. This differs from the triangular
-  `max_aspect_ratio`, which polices a continuous quantity; here it is
-  exact and integer.
+- **No aspect-ratio cap** (decided 2026-08-13). Extreme-aspect cells
+  are not filtered geometrically; a cut is offered to the gate
+  regardless of the resulting `|lx - ly|`, and pathological aspect
+  ratios must be priced by the null like any other candidate property
+  (a sliver cell's column carries little information and its candidate
+  should die at the gate, not at a geometric filter). This replaces
+  the triangular `max_aspect_ratio = 5.0` with the general principle:
+  geometry proposes, the null disposes. If measured behavior shows the
+  null failing to kill sliver artifacts, revisit as a *measured*
+  finding, not a prior.
 
 ## 2. The two species of rectangular weld
 
@@ -221,20 +225,34 @@ surpluses, depths, and stored footprints. That is the interface this
 geometry must deliver; the estimator lessons doc constrains how the
 statistical side may use it.
 
-## 7. Open decisions (not yet settled)
+## 7. Decisions log and remaining opens
 
-1. **Axis-choice policy for bisection candidates**: offer both axes as
-   separate gate candidates always, or pre-filter by a cheap
-   directional-curvature diagnostic? (Both-always is cleaner and lets
-   the gate own the decision; it doubles candidate count.)
-2. **Aspect cap A**: start at 2 (4:1)? The Ginnie design's natural
-   WALA/WAC anisotropy should inform this — measure before choosing.
-3. **Release-split pricing**: is a release split scored as part of the
-   candidate's gain (one composite candidate), or must the neighbor
-   split be independently justified first (two gate events)? Composite
-   risks smuggling unjustified refinement in on a strong candidate's
-   coattails; sequential risks never seeing strong hanging candidates
-   at all. Leaning composite-with-full-repricing, but this deserves a
-   known-truth simulation before commitment.
+Settled 2026-08-13:
+
+1. **Axis-choice policy**: both axes are always offered as separate
+   gate candidates (x-cut and y-cut of a cell are two candidates). No
+   pre-filtering diagnostic; the gate owns the axis decision and the
+   selection accounting must count both candidates.
+2. **No aspect cap**: see §1. Extreme aspect ratios are priced by the
+   null, not filtered by geometry.
+3. **Release-split pricing: composite move, adopted pending
+   simulation.** A hanging candidate is scored as the whole package
+   "release-split the coarse neighbor, then admit v" — one gate event,
+   one null. Consistent with (2): no separate geometric gatekeeping;
+   the gate prices the whole move. Mitigating the smuggled-refinement
+   worry: every vertex born of the release split is a weld (species 1
+   or 2), so the package admits exactly one free coefficient and pays
+   the gate's price for it — only *geometry* enters unjustified, not
+   parameters. Obligations that make the composite honest: the
+   composite null must be computed on the post-split design; the split
+   is a design-changing event, so everything it touches is re-priced;
+   and the alternative sequential policy (neighbor split must justify
+   itself first) is the known-truth-simulation comparison arm before
+   this is frozen — the failure mode to measure is topology feedback
+   from evidence-free refinement (the containment-exclusion lesson:
+   mechanism-sound changes can still lose held-out through the gate).
+
+Still open:
+
 4. **Tau by (depth, axis)** — deferred until anisotropy is measured
    (§1 consequences).
