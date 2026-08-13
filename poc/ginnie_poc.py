@@ -1,15 +1,17 @@
-"""First-look rectangular-mesh fits of the frozen Ginnie designs:
+"""Binomial rectangular-mesh fits of the frozen Ginnie designs:
 cumulative attrition proxy (data/ginnie_design.csv, pooled rate 0.7832)
 and monthly SMM (data/smm_design_202606.csv, rate 0.0085).
 
-This is the Gaussian PoC stack on empirical logits, NOT the production
-binomial pipeline: response z = log((k+.5)/(n-k+.5)), weight
-w = n*p~(1-p~), fitted by the weighted penalized hierarchical solve, and
-gated by the e-BH round structure with the triangular pool-variance
-pricing ported into the candidate null:
+Exact per-pool binomial likelihood k ~ Bin(n, expit(f)), fitted by
+penalized IRLS on the hierarchical basis (design built once per
+topology; IRLS/EM are linear algebra), per-depth tau by EM on the
+working model, and the e-BH gate rounds with score-test statistics
+under the triangular pool-variance pricing:
     Var(beta_hat) = 1/xTwx + GEV * sum(w^2 b^2) / xTwx^2   (GEV = 0.35)
-(core/pipeline.cpp's gate_var, weighted-Gaussian form). Pools are
-subsampled for PoC runtime; all caveats printed into the results JSON.
+with w = n p(1-p) the binomial information. This replaces the earlier
+Gaussian empirical-logit surrogate, whose SMM breakdown (66.5% of pools
+have zero events) motivated the switch. Pools are subsampled for PoC
+runtime; caveats in the results JSON.
 """
 
 import json
@@ -43,6 +45,7 @@ def load(fname, rng):
     x = (d["wala"] - WALA_LO) / (WALA_HI - WALA_LO)
     y = (d["wac"] - WAC_LO) / (WAC_HI - WAC_LO)
     n, k = d["n0"], d["k_term"]
+    # empirical logit + weight kept for the observed-panel DISPLAY only
     pt = (k + 0.5) / (n + 1.0)
     z = np.log((k + 0.5) / (n - k + 0.5))
     w = n * pt * (1 - pt)
@@ -50,6 +53,10 @@ def load(fname, rng):
     hold = np.zeros(len(d), bool)
     hold[rng.permutation(len(d))[:n_hold]] = True
     return x, y, z, w, n, k, hold
+
+
+def expit(f):
+    return 1.0 / (1.0 + np.exp(-np.clip(f, -12.0, 12.0)))
 
 
 def ebf(beta, info, tau):
@@ -60,24 +67,29 @@ def ebf(beta, info, tau):
         min(700.0, t2 * info * info * beta * beta / (2 * (1.0 + t2 * info))))
 
 
-def fit_w_em(mesh, xs, ys, zs, ws, iters=6):
-    """Weighted penalized solve with per-depth tau estimated by exact
-    marginal-likelihood EM (REGRESSION_DESIGN §3): the M-step average
-    uses posterior moments delta^2 + S_vv, so zero-information vertices
-    contribute ~tau^2 and cast no vote. Weights are precisions, so the
-    posterior covariance is exactly A^{-1}."""
+def fit_binom_em(mesh, xs, ys, nn, kk, em_iters=3, irls_iters=8):
+    """Penalized binomial IRLS on the hierarchical basis with per-depth
+    tau by EM on the working model (REGRESSION_DESIGN §3, binomial
+    bridge). The design is built once per topology; each IRLS step
+    reuses it with refreshed working weights w = n p(1-p) and response
+    z = f + (k - n p)/w. The EM M-step uses posterior moments
+    delta^2 + S_vv from the working-model covariance A^{-1}."""
     keys, X = mesh.design_hier(xs, ys)
     depths = np.array([mesh.verts[k].depth for k in keys])
-    XtW = (X * ws[:, None]).T
-    A0 = XtW @ X
-    b = XtW @ np.asarray(zs)
     taus = {int(d): TAU for d in set(depths) if d > 0}
     delta = np.zeros(len(keys))
-    for _ in range(iters):
+    Ainv = None
+    for _ in range(em_iters):
         lam = np.array([0.0 if d == 0 else 1.0 / taus[int(d)] ** 2
                         for d in depths])
-        Ainv = np.linalg.inv(A0 + np.diag(lam))
-        delta = Ainv @ b
+        for _ in range(irls_iters):
+            f = X @ delta
+            p = expit(f)
+            w = np.maximum(nn * p * (1 - p), 1e-8)
+            zw = f + (kk - nn * p) / w
+            XtW = (X * w[:, None]).T
+            Ainv = np.linalg.inv(XtW @ X + np.diag(lam))
+            delta = Ainv @ (XtW @ zw)
         svv = np.diag(Ainv)
         for d in taus:
             m2 = delta[depths == d] ** 2 + svv[depths == d]
@@ -119,16 +131,19 @@ def seed_uniform(mesh, levels=3):
             mesh.promote(k)
 
 
-def run_gate_w(xs, ys, zs, ws):
+def run_gate_w(xs, ys, nn, kk):
     mesh = RectMesh()
     seed_uniform(mesh, levels=4)
-    taus = fit_w_em(mesh, xs, ys, zs, ws)
+    taus = fit_binom_em(mesh, xs, ys, nn, kk)
     admitted = []
     for _ in range(MAX_ROUNDS):
         if len(admitted) >= MAX_ADMIT:
             break
         pred = np.array([mesh.eval(x, y) for x, y in zip(xs, ys)])
-        r = zs - pred
+        # binomial score-test working residuals and weights at the fit
+        p_cur = expit(pred)
+        ws = np.maximum(nn * p_cur * (1 - p_cur), 1e-8)
+        r = (kk - nn * p_cur) / ws
         cands = {}
         for leaf in mesh.leaves:
             inside = ((xs * S > leaf.x0) & (xs * S <= leaf.x1)
@@ -187,13 +202,15 @@ def run_gate_w(xs, ys, zs, ws):
             mesh.promote(pos)
             pred_live = np.array([mesh.eval(x, y) for x, y in zip(xs, ys)])
             col = exact_column(mesh, pos, xs, ys)
-            st = cand_stats(col, zs - pred_live, ws,
+            p_live = expit(pred_live)
+            w_live = np.maximum(nn * p_live * (1 - p_live), 1e-8)
+            st = cand_stats(col, (kk - nn * p_live) / w_live, w_live,
                             tau_at(taus, mesh.verts[pos].depth))
             if st is None or np.sign(st["beta"]) != np.sign(c["beta"]) \
                     or st["e"] <= 1.0:
                 mesh.verts[pos].state = "weld"
                 continue
-            taus = fit_w_em(mesh, xs, ys, zs, ws)
+            taus = fit_binom_em(mesh, xs, ys, nn, kk)
             admitted.append(pos)
             committed += 1
         if committed == 0:
@@ -208,9 +225,7 @@ def binned(xs, ys, vals, ws, nb=48):
     iy = np.clip((ys * nb).astype(int), 0, nb - 1)
     np.add.at(num, (iy, ix), ws * vals)
     np.add.at(den, (iy, ix), ws)
-    out = np.where(den > 0, num / np.maximum(den, 1e-300), np.nan)
-    fill = np.nansum(num) / max(np.sum(den), 1e-300)
-    return np.where(np.isnan(out), fill, out)
+    return np.where(den > 0, num / np.maximum(den, 1e-300), np.nan)
 
 
 def deviance_per_pool(n, k, p):
@@ -225,9 +240,9 @@ def run_dataset(fname, tag, title):
     rng = np.random.default_rng(7)
     x, y, z, w, n, k, hold = load(fname, rng)
     tr = ~hold
-    mesh, admitted = run_gate_w(x[tr], y[tr], z[tr], w[tr])
+    mesh, admitted = run_gate_w(x[tr], y[tr], n[tr], k[tr])
     pred = np.array([mesh.eval(xi, yi) for xi, yi in zip(x, y)])
-    p_hat = 1 / (1 + np.exp(-pred))
+    p_hat = expit(pred)
     rate0 = k[tr].sum() / n[tr].sum()
     res = {
         "n_pools_subsampled": int(len(x)), "n_train": int(tr.sum()),
@@ -237,14 +252,20 @@ def run_dataset(fname, tag, title):
             n[hold], k[hold], p_hat[hold]),
         "heldout_deviance_per_pool_constant_baseline": deviance_per_pool(
             n[hold], k[hold], np.full(int(hold.sum()), rate0)),
-        "caveats": "Gaussian empirical-logit PoC on a 12k-pool subsample, "
-                   "unthresholded 16x16 coarse seed, per-depth EM tau, GEV=0.35; "
-                   "not the production binomial pipeline.",
+        "stack": "binomial IRLS",
+        "caveats": "Exact-binomial PoC on a 12k-pool subsample, "
+                   "unthresholded 16x16 coarse seed, per-depth EM tau on the "
+                   "working model, GEV=0.35 in the gate null only; no pool "
+                   "effects in the fit, no law machinery.",
     }
     obs = binned(x, y, z, w)
     gg = (np.arange(96) + 0.5) / 96
     fgrid = np.array([[mesh.eval(xi, yi) for xi in gg] for yi in gg])
-    lo, hi = float(obs.min()), float(obs.max())
+    # mask the fitted/residual panels where no data constrains the fit
+    presence = ~np.isnan(obs)
+    mask96 = np.repeat(np.repeat(presence, 2, 0), 2, 1)
+    fgrid = np.where(mask96, fgrid, np.nan)
+    lo, hi = float(np.nanmin(obs)), float(np.nanmax(obs))
     heatmap_svg(obs, f"{tag}_obs.svg",
                 f"{title}: observed logit (binned, weighted)", lo, hi)
     heatmap_svg(fgrid, f"{tag}_fitted.svg",
@@ -259,12 +280,21 @@ def run_dataset(fname, tag, title):
 
 
 def main():
+    gauss_ref = {}
+    ref_path = os.path.join(OUT, "ginnie_results.json")
+    if os.path.exists(ref_path):
+        prev = json.load(open(ref_path))
+        for kk_ in ("cumulative", "smm"):
+            if kk_ in prev and "stack" not in prev[kk_]:
+                gauss_ref[kk_] = prev[kk_]["heldout_deviance_per_pool"]
     results = {
         "cumulative": run_dataset("ginnie_design.csv", "ginnie",
                                   "Ginnie cumulative attrition"),
         "smm": run_dataset("smm_design_202606.csv", "smm",
                            "Ginnie monthly SMM"),
     }
+    for kk_, v in gauss_ref.items():
+        results[kk_]["gaussian_surrogate_reference"] = v
     with open(os.path.join(OUT, "ginnie_results.json"), "w") as f:
         json.dump(results, f, indent=2)
     print(json.dumps(results, indent=2))

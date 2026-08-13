@@ -39,19 +39,24 @@ def _color(v):
 
 
 def heatmap_svg(grid, fname, title, vmin=None, vmax=None):
+    """NaN cells render as neutral gray: no data, not a value."""
     n = grid.shape[0]
-    vmin = grid.min() if vmin is None else vmin
-    vmax = grid.max() if vmax is None else vmax
+    has_nan = bool(np.isnan(grid).any())
+    vmin = np.nanmin(grid) if vmin is None else vmin
+    vmax = np.nanmax(grid) if vmax is None else vmax
     span = (vmax - vmin) or 1.0
     px, w = 6, 6 * n
+    label = f"{title}  [{vmin:.2f}, {vmax:.2f}]"
+    if has_nan:
+        label += "  (gray = no data)"
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {w+30}" '
              f'font-family="sans-serif">',
-             f'<text x="4" y="18" font-size="16">{title}  '
-             f'[{vmin:.2f}, {vmax:.2f}]</text>',
+             f'<text x="4" y="18" font-size="16">{label}</text>',
              f'<g transform="translate(0,26)">']
     for iy in range(n):
         for ix in range(n):
-            c = _color((grid[iy, ix] - vmin) / span)
+            v = grid[iy, ix]
+            c = "#9ca3af" if np.isnan(v) else _color((v - vmin) / span)
             parts.append(f'<rect x="{ix*px}" y="{(n-1-iy)*px}" width="{px}" '
                          f'height="{px}" fill="{c}"/>')
     parts.append("</g></svg>")

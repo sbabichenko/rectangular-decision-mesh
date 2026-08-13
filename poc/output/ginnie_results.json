@@ -5,9 +5,11 @@
     "n_heldout": 3000,
     "n_admitted": 0,
     "n_leaves": 256,
-    "heldout_deviance_per_pool": 10.143445447852683,
+    "heldout_deviance_per_pool": 10.145215342971035,
     "heldout_deviance_per_pool_constant_baseline": 162.6092803007087,
-    "caveats": "Gaussian empirical-logit PoC on a 12k-pool subsample, unthresholded 16x16 coarse seed, per-depth EM tau, GEV=0.35; not the production binomial pipeline."
+    "stack": "binomial IRLS",
+    "caveats": "Exact-binomial PoC on a 12k-pool subsample, unthresholded 16x16 coarse seed, per-depth EM tau on the working model, GEV=0.35 in the gate null only; no pool effects in the fit, no law machinery.",
+    "gaussian_surrogate_reference": 10.143445447852683
   },
   "smm": {
     "n_pools_subsampled": 12000,
@@ -15,8 +17,10 @@
     "n_heldout": 3000,
     "n_admitted": 0,
     "n_leaves": 256,
-    "heldout_deviance_per_pool": 1.8218520544831251,
+    "heldout_deviance_per_pool": 1.3037315315430775,
     "heldout_deviance_per_pool_constant_baseline": 1.7757756413485082,
-    "caveats": "Gaussian empirical-logit PoC on a 12k-pool subsample, unthresholded 16x16 coarse seed, per-depth EM tau, GEV=0.35; not the production binomial pipeline."
+    "stack": "binomial IRLS",
+    "caveats": "Exact-binomial PoC on a 12k-pool subsample, unthresholded 16x16 coarse seed, per-depth EM tau on the working model, GEV=0.35 in the gate null only; no pool effects in the fit, no law machinery.",
+    "gaussian_surrogate_reference": 1.8218520544831251
   }
 }
