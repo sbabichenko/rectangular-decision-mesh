@@ -1,0 +1,44 @@
+{
+  "null_prod_bh": {
+    "reps": 40,
+    "realized_FDR": 0.0,
+    "mean_admissions": 0.0,
+    "mean_false": 0.0
+  },
+  "null_prod_ebh": {
+    "reps": 40,
+    "realized_FDR": 0.0,
+    "mean_admissions": 0.0,
+    "mean_false": 0.0
+  },
+  "chirp_clean_mismatched": {
+    "sigma_assumed": 0.3,
+    "sigma_true": 0.05,
+    "n_admitted": 130,
+    "n_leaves": 228,
+    "rmse_vs_truth_grid": 0.2872050377385865
+  },
+  "chirp_clean_matched": {
+    "sigma_assumed": 0.05,
+    "sigma_true": 0.05,
+    "n_admitted": 124,
+    "n_leaves": 163,
+    "rmse_vs_truth_grid": 0.3101006389350354
+  },
+  "weak_chirp_matched": {
+    "sigma_assumed": 0.05,
+    "sigma_true": 0.05,
+    "amplitude_scale": 0.15,
+    "n_admitted": 123,
+    "n_leaves": 236,
+    "rmse_vs_truth_grid": 0.046860452722957364
+  },
+  "weak_chirp_mismatched": {
+    "sigma_assumed": 0.3,
+    "sigma_true": 0.05,
+    "amplitude_scale": 0.15,
+    "n_admitted": 0,
+    "n_leaves": 1,
+    "rmse_vs_truth_grid": 0.12359265503197388
+  }
+}

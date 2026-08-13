@@ -122,17 +122,23 @@ def fit_hier(mesh, xs, ys, zs, sigma, tau):
 # ------------------------------------------------------------- gate rounds
 
 def run_gate(truth_f, rng, arm="ebh", n=2000, sigma=0.1, q=0.1, tau=0.5,
-             max_rounds=15, min_pts=12):
+             max_rounds=15, min_pts=12, sigma_true=None, max_admit=None):
+    """sigma is what the gate/fitter ASSUMES; sigma_true (default: sigma)
+    generates the data. The split exists to reproduce the triangular
+    scenario gotcha: the gate's assumed noise must match the regime."""
     xs = rng.random(n)
     ys = rng.random(n)
     f_true = truth_f(xs, ys)
-    zs = f_true + sigma * rng.normal(size=n)
+    zs = f_true + (sigma if sigma_true is None else sigma_true) \
+        * rng.normal(size=n)
 
     mesh = RectMesh()
     fit_hier(mesh, xs, ys, zs, sigma, tau)
     admitted = []  # (key, depth, delta_true)
 
     for _ in range(max_rounds):
+        if max_admit is not None and len(admitted) >= max_admit:
+            break
         pred = np.array([mesh.eval(x, y) for x, y in zip(xs, ys)])
         r = zs - pred
         # ---- batch scoring: chord-endpoint candidates of every leaf cut
