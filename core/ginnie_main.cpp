@@ -39,6 +39,12 @@ static const double kIrlsStepCap = 4.0;
 static const int kSeedSplits = 96;
 static const int kSeedRefitEvery = 10;
 static const int kSeedDepthCap = 8;  // coarse stage stays coarse (16x16 scale)
+// Unthresholded does not mean noise-driven: a seed split must clear a
+// minimal local gain (~chi^2_2 far tail), or weak-information data
+// (SMM) gets noise splits whose wild unthresholded coefficients
+// wreck the seed fit (measured: seed-only SMM deviance 18.8 vs 1.96
+// constant without this floor).
+static const double kSeedMinGain = 10.0;
 
 struct Data {
     std::vector<double> x, y, n, k;
@@ -109,7 +115,30 @@ struct FitState {
     std::map<int, double> taus;              // depth -> tau
     std::unordered_map<VKey, double> svv;    // posterior variance
     std::vector<double> delta;
+    // Writeup-conformant pool handling (retraction item 4: law-tempered
+    // fitting weights are retired, double-charging): the FIT uses
+    // binomial information with a scalar stage residual-dispersion
+    // extra xi (working weight 1/(1/w + xi)); the LAW (per-stratum
+    // pool-effect variances) prices admissions only, in the one-law
+    // composite candidate null. Strata by exposure: <128, 128-512,
+    // 512-4096, 4096+. s2 estimated per stratum by ML on the working
+    // model (Gaussian simplification of the writeup's two-normal EM
+    // mixture law; moment instruments are convicted of ~3.5x upward
+    // bias under heavy tails and are not used).
+    double xi = 0.0;
+    double law_s2[4] = {0, 0, 0, 0};
 };
+
+static int stratum_of(double n0) {
+    if (n0 < 128) return 0;
+    if (n0 < 512) return 1;
+    if (n0 < 4096) return 2;
+    return 3;
+}
+
+static double work_weight(double w_bin, double xi) {
+    return 1.0 / (1.0 / w_bin + xi);
+}
 
 static void fit_binom_em(RectMesh& mesh, const Data& d,
                          const std::vector<int>& tr, FitState* st,
@@ -148,8 +177,9 @@ static void fit_binom_em(RectMesh& mesh, const Data& d,
                 for (auto& e : rows[i]) fi += e.second * st->delta[e.first];
                 f[i] = fi;
                 const double pp = expit(fi);
-                w[i] = std::max(d.n[tr[i]] * pp * (1 - pp), 1e-8);
-                zw[i] = fi + (d.k[tr[i]] - d.n[tr[i]] * pp) / w[i];
+                const double wb = std::max(d.n[tr[i]] * pp * (1 - pp), 1e-8);
+                zw[i] = fi + (d.k[tr[i]] - d.n[tr[i]] * pp) / wb;
+                w[i] = work_weight(wb, st->xi);
             }
             std::fill(A.begin(), A.end(), 0.0);
             std::fill(b.begin(), b.end(), 0.0);
@@ -179,6 +209,61 @@ static void fit_binom_em(RectMesh& mesh, const Data& d,
             const double frac = mx <= kIrlsStepCap ? 1.0 : kIrlsStepCap / mx;
             for (int i = 0; i < p; ++i)
                 st->delta[i] += frac * (nd[i] - st->delta[i]);
+        }
+        // stage residual-dispersion extra xi: solve
+        // sum res^2 / (wb (1 + wb xi)) = N - p by bisection
+        {
+            std::vector<double> res2(n), wb(n);
+            for (size_t i = 0; i < n; ++i) {
+                double fi = 0;
+                for (auto& e : rows[i]) fi += e.second * st->delta[e.first];
+                const double pp = expit(fi);
+                wb[i] = std::max(d.n[tr[i]] * pp * (1 - pp), 1e-8);
+                const double rr = d.k[tr[i]] - d.n[tr[i]] * pp;
+                res2[i] = rr * rr;
+            }
+            auto pearson = [&](double xi) {
+                double s2 = 0;
+                for (size_t i = 0; i < n; ++i)
+                    s2 += res2[i] / (wb[i] * (1 + wb[i] * xi));
+                return s2;
+            };
+            const double target = (double)n - p;
+            if (pearson(0.0) <= target) {
+                st->xi = 0.0;
+            } else {
+                double lo = 0.0, hi = 4.0;
+                for (int it2 = 0; it2 < 60; ++it2) {
+                    const double mid = 0.5 * (lo + hi);
+                    (pearson(mid) > target ? lo : hi) = mid;
+                }
+                st->xi = 0.5 * (lo + hi);
+            }
+            // per-stratum law variances by 1-D ML on working residuals
+            // z_res ~ N(0, 1/wb + s2), maximized by bisection on the
+            // score; the law prices admissions only (never weights).
+            for (int s4 = 0; s4 < 4; ++s4) {
+                std::vector<int> idx;
+                for (size_t i = 0; i < n; ++i)
+                    if (stratum_of(d.n[tr[i]]) == s4) idx.push_back((int)i);
+                if (idx.size() < 30) { st->law_s2[s4] = 0; continue; }
+                auto score = [&](double s2v) {
+                    double sc = 0;
+                    for (int i : idx) {
+                        const double v = 1.0 / wb[i] + s2v;
+                        const double z2 = res2[i] / (wb[i] * wb[i]);
+                        sc += (z2 - v) / (v * v);
+                    }
+                    return sc;
+                };
+                if (score(0.0) <= 0) { st->law_s2[s4] = 0; continue; }
+                double lo = 0.0, hi = 4.0;
+                for (int it2 = 0; it2 < 60; ++it2) {
+                    const double mid = 0.5 * (lo + hi);
+                    (score(mid) > 0 ? lo : hi) = mid;
+                }
+                st->law_s2[s4] = 0.5 * (lo + hi);
+            }
         }
         ch.inverse_diag(&diag);
         for (auto& kvt : st->taus) {
@@ -217,21 +302,29 @@ struct CandStat {
 
 static CandStat cand_stats(const std::vector<double>& col,
                            const std::vector<double>& r,
-                           const std::vector<double>& w, double parent_var) {
+                           const std::vector<double>& w,
+                           const std::vector<double>& s2,
+                           double parent_var) {
     CandStat s;
-    double xtwx = 0, w2b2 = 0, xtwr = 0;
+    double xtwx = 0, w2b2 = 0, xtwr = 0, w2b2s = 0;
     for (size_t i = 0; i < col.size(); ++i) {
         const double b = col[i];
         if (b == 0) continue;
         xtwx += w[i] * b * b;
         w2b2 += w[i] * w[i] * b * b;
+        w2b2s += w[i] * w[i] * b * b * s2[i];
         xtwr += w[i] * b * r[i];
     }
     if (xtwx <= 0) return s;
     const double keff = xtwx * xtwx / w2b2;
     if (keff < kMinKeff) return s;
     s.beta = xtwr / xtwx;
-    const double var = 1.0 / xtwx + kGEV * w2b2 / (xtwx * xtwx) +
+    // one-law composite null (writeup §recommended config): data
+    // variance + per-stratum pool-law variance + parent posterior
+    // variance. The law prices admission; it never tempers weights.
+    // (kGEV retained as the documented scalar fallback value.)
+    (void)kGEV;
+    const double var = 1.0 / xtwx + w2b2s / (xtwx * xtwx) +
                        kParentVarScale * parent_var;
     s.z = s.beta / std::sqrt(var);
     s.ok = true;
@@ -381,7 +474,7 @@ int main(int argc, char** argv) {
             if (gx > best_gain) { best_gain = gx; best_leaf = leaf; best_axis = 'x'; }
             if (gy > best_gain) { best_gain = gy; best_leaf = leaf; best_axis = 'y'; }
         }
-        if (!best_leaf) break;
+        if (!best_leaf || best_gain < kSeedMinGain) break;
         const int dnew = best_leaf->lx + best_leaf->ly + 1;
         mesh.split(best_leaf, best_axis, Origin::Seed);
         std::vector<VKey> to_promote;
@@ -401,12 +494,14 @@ int main(int argc, char** argv) {
     for (int rnd = 0; rnd < kMaxRounds; ++rnd) {
         if ((int)admitted.size() >= kMaxAdmit) break;
         const size_t n = tr.size();
-        std::vector<double> f(n), w(n), r(n);
+        std::vector<double> f(n), w(n), r(n), s2(n);
         for (size_t i = 0; i < n; ++i) {
             f[i] = mesh.eval(d.x[tr[i]], d.y[tr[i]]);
             const double pp = expit(f[i]);
-            w[i] = std::max(d.n[tr[i]] * pp * (1 - pp), 1e-8);
-            r[i] = (d.k[tr[i]] - d.n[tr[i]] * pp) / w[i];
+            const double wb = std::max(d.n[tr[i]] * pp * (1 - pp), 1e-8);
+            r[i] = (d.k[tr[i]] - d.n[tr[i]] * pp) / wb;
+            w[i] = work_weight(wb, st.xi);
+            s2[i] = st.law_s2[stratum_of(d.n[tr[i]])];
         }
         // point -> leaf partition
         std::unordered_map<const Cell*, std::vector<int>> pts;
@@ -445,7 +540,7 @@ int main(int argc, char** argv) {
                     }
                     Vertex* vx = mesh.vertex(pos);
                     if (vx && vx->state == VState::Free) continue;
-                    std::vector<double> col, rr, ww;
+                    std::vector<double> col, rr, ww, ss;
                     auto add_side = [&](Cell* c, bool mirrored) {
                         auto it2 = pts.find(c);
                         if (it2 == pts.end()) return;
@@ -468,6 +563,7 @@ int main(int argc, char** argv) {
                             col.push_back(tent * trans);
                             rr.push_back(r[idx]);
                             ww.push_back(w[idx]);
+                            ss.push_back(s2[idx]);
                         }
                     };
                     add_side(leaf, false);
@@ -488,7 +584,8 @@ int main(int argc, char** argv) {
                                                    leaf->y1);
                     auto itn = leaf_by_box.find(nb);
                     if (itn != leaf_by_box.end()) add_side(itn->second, true);
-                    CandStat cs = cand_stats(col, rr, ww, parent_var(pk));
+                    CandStat cs =
+                        cand_stats(col, rr, ww, ss, parent_var(pk));
                     if (!cs.ok) continue;
                     auto prev = cands.find(pos);
                     if (prev == cands.end() ||
@@ -515,7 +612,7 @@ int main(int argc, char** argv) {
                 std::vector<VKey> pk;
                 for (auto& mw : mesh.masters(kv.second))
                     pk.push_back(key_of(mw.first->ix, mw.first->iy));
-                CandStat cs = cand_stats(col, r, w, parent_var(pk));
+                CandStat cs = cand_stats(col, r, w, s2, parent_var(pk));
                 if (!cs.ok) continue;
                 cands[kv.first] = {kv.first, nullptr, 0, cs};
             }
@@ -548,19 +645,21 @@ int main(int argc, char** argv) {
                 xs2.push_back(d.x[tr[i]]);
                 ys2.push_back(d.y[tr[i]]);
             }
-            std::vector<double> fl(n), wl(n), rl(n);
+            std::vector<double> fl(n), wl(n), rl(n), sl(n);
             for (size_t i = 0; i < n; ++i) {
                 fl[i] = mesh.eval(xs2[i], ys2[i]);
                 const double pp = expit(fl[i]);
-                wl[i] = std::max(d.n[tr[i]] * pp * (1 - pp), 1e-8);
-                rl[i] = (d.k[tr[i]] - d.n[tr[i]] * pp) / wl[i];
+                const double wb = std::max(d.n[tr[i]] * pp * (1 - pp), 1e-8);
+                rl[i] = (d.k[tr[i]] - d.n[tr[i]] * pp) / wb;
+                wl[i] = work_weight(wb, st.xi);
+                sl[i] = st.law_s2[stratum_of(d.n[tr[i]])];
             }
             mesh.probe_column(c.pos, xs2, ys2, &col);
             std::vector<VKey> pk;
             Vertex* vlive = mesh.vertex(c.pos);
             for (auto& mw : vlive->birth_parents)
                 pk.push_back(key_of(mw.first->ix, mw.first->iy));
-            CandStat live = cand_stats(col, rl, wl, parent_var(pk));
+            CandStat live = cand_stats(col, rl, wl, sl, parent_var(pk));
             const bool sign_ok =
                 live.ok && ((live.beta > 0) == (c.st.beta > 0));
             // B1 analogue: live evidence must stand on its own (|z|>1
@@ -599,7 +698,9 @@ int main(int argc, char** argv) {
     };
     const double dev = dev_per_pool(ho, false);
     const double dev0 = dev_per_pool(ho, true);
-    std::printf("held-out deviance/pool %.4f (constant %.4f)\n", dev, dev0);
+    std::printf("held-out deviance/pool %.4f (constant %.4f), xi %.4f, "
+                "law s2 = %.4f/%.4f/%.4f/%.4f\n", dev, dev0, st.xi,
+                st.law_s2[0], st.law_s2[1], st.law_s2[2], st.law_s2[3]);
 
     // ---- outputs
     std::string out(argv[2]);
@@ -611,10 +712,14 @@ int main(int argc, char** argv) {
                      "  \"n_leaves\": %zu,\n  \"n_free\": %zu,\n"
                      "  \"heldout_deviance_per_pool\": %.6f,\n"
                      "  \"heldout_deviance_per_pool_constant_baseline\": %.6f,\n"
-                     "  \"stack\": \"C++ binomial IRLS, full data\"\n}\n",
+                     "  \"xi_dispersion_extra\": %.6f,\n"
+                     "  \"law_s2_strata\": [%.6f, %.6f, %.6f, %.6f],\n"
+                     "  \"stack\": \"C++ binomial IRLS + xi dispersion, "
+                     "one-law gate, full data\"\n}\n",
                      N, tr.size(), ho.size(), admitted.size(),
                      mesh.leaf_cells().size(), mesh.free_keys().size(), dev,
-                     dev0);
+                     dev0, st.xi, st.law_s2[0], st.law_s2[1], st.law_s2[2],
+                     st.law_s2[3]);
         std::fclose(fp);
     }
     {

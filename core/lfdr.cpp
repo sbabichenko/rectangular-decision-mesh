@@ -156,14 +156,20 @@ LfdrResult lindsey_lfdr(std::vector<double> z, bool free_empirical_null) {
         // exact score on a common null scale, allow central matching to measure
         // the remaining family-level fit-state contraction instead of forcing
         // sigma0 >= 1.  This is opt-in until the null regressions are frozen.
-        (void)free_empirical_null;
-        const double default_smin = 0.3;
-        const double default_smax = 6.0;
+        // Two documented modes (writeup + triangular lfdr.cpp): the
+        // non-free mode keeps the central-matching constraint sigma0 >= 1
+        // (retraction item 5); the free mode is the B3 box the benchmark
+        // config sets (sigma0 in [0.3, 6]) — legitimate only when the
+        // family is expected to be fit-state contracted (sandwich-scaled
+        // scores in triangular B3; raw underdispersed score families in
+        // the rectangular port).
+        const double default_smin = free_empirical_null ? 0.3 : 1.0;
+        const double default_smax = free_empirical_null ? 6.0 : 1.4;
         // Only the scale box is released in B3.  Keep the conservative
         // location cap and pi0 floor: a coarse underfit can create widespread
         // same-sign signal, and the empirical null must not absorb that signal
         // by drifting its mean or declaring almost the whole family non-null.
-        const double default_pi0min = 0.05;
+        const double default_pi0min = free_empirical_null ? 0.05 : 0.5;
         const double default_dmax = 0.5;
         const double S0MIN = std::getenv("DMESH_SIGMA0_MIN")
             ? std::atof(std::getenv("DMESH_SIGMA0_MIN")) : default_smin;

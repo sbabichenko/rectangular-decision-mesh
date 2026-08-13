@@ -2,10 +2,12 @@
   "n_pools": 33740,
   "n_train": 25294,
   "n_heldout": 8446,
-  "n_admitted": 88,
-  "n_leaves": 475,
-  "n_free": 226,
-  "heldout_deviance_per_pool": 1.674551,
+  "n_admitted": 68,
+  "n_leaves": 349,
+  "n_free": 179,
+  "heldout_deviance_per_pool": 1.198429,
   "heldout_deviance_per_pool_constant_baseline": 1.961635,
-  "stack": "C++ binomial IRLS, full data"
+  "xi_dispersion_extra": 0.360833,
+  "law_s2_strata": [0.628220, 0.332821, 0.319423, 0.133836],
+  "stack": "C++ binomial IRLS + xi dispersion, one-law gate, full data"
 }
