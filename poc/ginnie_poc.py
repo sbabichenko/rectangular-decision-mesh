@@ -28,7 +28,7 @@ TAU = 0.5
 Q = 0.1
 MAX_ADMIT = 60
 MAX_ROUNDS = 8
-MIN_PTS = 40
+MIN_PTS = 25
 N_SUB = 12000
 HOLD_FRAC = 0.25
 
@@ -60,16 +60,39 @@ def ebf(beta, info, tau):
         min(700.0, t2 * info * info * beta * beta / (2 * (1.0 + t2 * info))))
 
 
-def fit_w(mesh, xs, ys, zs, ws, tau):
+def fit_w_em(mesh, xs, ys, zs, ws, iters=6):
+    """Weighted penalized solve with per-depth tau estimated by exact
+    marginal-likelihood EM (REGRESSION_DESIGN §3): the M-step average
+    uses posterior moments delta^2 + S_vv, so zero-information vertices
+    contribute ~tau^2 and cast no vote. Weights are precisions, so the
+    posterior covariance is exactly A^{-1}."""
     keys, X = mesh.design_hier(xs, ys)
-    lam = np.array([0.0 if mesh.verts[k].depth == 0 else 1.0 / tau ** 2
-                    for k in keys])
-    A = (X * ws[:, None]).T @ X + np.diag(lam)
-    delta = np.linalg.solve(A, (X * ws[:, None]).T @ zs)
+    depths = np.array([mesh.verts[k].depth for k in keys])
+    XtW = (X * ws[:, None]).T
+    A0 = XtW @ X
+    b = XtW @ np.asarray(zs)
+    taus = {int(d): TAU for d in set(depths) if d > 0}
+    delta = np.zeros(len(keys))
+    for _ in range(iters):
+        lam = np.array([0.0 if d == 0 else 1.0 / taus[int(d)] ** 2
+                        for d in depths])
+        Ainv = np.linalg.inv(A0 + np.diag(lam))
+        delta = Ainv @ b
+        svv = np.diag(Ainv)
+        for d in taus:
+            m2 = delta[depths == d] ** 2 + svv[depths == d]
+            taus[d] = max(float(np.sqrt(m2.mean())), 0.02)
     mesh.resolve_heights_hier(dict(zip(keys, delta)))
+    return taus
 
 
-def cand_stats(col, r, w):
+def tau_at(taus, d):
+    if not taus:
+        return TAU
+    return taus.get(d, taus[min(taus, key=lambda k: abs(k - d))])
+
+
+def cand_stats(col, r, w, tau=TAU):
     xTwx = float((w * col) @ col)
     if xTwx <= 0:
         return None
@@ -78,7 +101,7 @@ def cand_stats(col, r, w):
     var = 1.0 / xTwx + GEV * float((w * w * col) @ col) / xTwx ** 2
     info = 1.0 / var
     return {"beta": beta, "z": beta / np.sqrt(var), "info": info,
-            "e": ebf(beta, info, TAU)}
+            "e": ebf(beta, info, tau)}
 
 
 def seed_uniform(mesh, levels=3):
@@ -98,8 +121,8 @@ def seed_uniform(mesh, levels=3):
 
 def run_gate_w(xs, ys, zs, ws):
     mesh = RectMesh()
-    seed_uniform(mesh)
-    fit_w(mesh, xs, ys, zs, ws, TAU)
+    seed_uniform(mesh, levels=4)
+    taus = fit_w_em(mesh, xs, ys, zs, ws)
     admitted = []
     for _ in range(MAX_ROUNDS):
         if len(admitted) >= MAX_ADMIT:
@@ -125,7 +148,8 @@ def run_gate_w(xs, ys, zs, ws):
                     vx = mesh.verts.get(pos)
                     if vx is not None and vx.state == "free":
                         continue
-                    st = cand_stats(tent * trans, r[inside], ws[inside])
+                    st = cand_stats(tent * trans, r[inside], ws[inside],
+                                    tau_at(taus, leaf.lx + leaf.ly + 1))
                     if st is None:
                         continue
                     prev = cands.get(pos)
@@ -138,7 +162,7 @@ def run_gate_w(xs, ys, zs, ws):
             col = exact_column(mesh, key, xs, ys)
             if np.count_nonzero(col) < MIN_PTS:
                 continue
-            st = cand_stats(col, r, ws)
+            st = cand_stats(col, r, ws, tau_at(taus, vx.depth))
             if st is None:
                 continue
             st.update({"leaf": None, "axis": None})
@@ -163,12 +187,13 @@ def run_gate_w(xs, ys, zs, ws):
             mesh.promote(pos)
             pred_live = np.array([mesh.eval(x, y) for x, y in zip(xs, ys)])
             col = exact_column(mesh, pos, xs, ys)
-            st = cand_stats(col, zs - pred_live, ws)
+            st = cand_stats(col, zs - pred_live, ws,
+                            tau_at(taus, mesh.verts[pos].depth))
             if st is None or np.sign(st["beta"]) != np.sign(c["beta"]) \
                     or st["e"] <= 1.0:
                 mesh.verts[pos].state = "weld"
                 continue
-            fit_w(mesh, xs, ys, zs, ws, TAU)
+            taus = fit_w_em(mesh, xs, ys, zs, ws)
             admitted.append(pos)
             committed += 1
         if committed == 0:
@@ -213,7 +238,7 @@ def run_dataset(fname, tag, title):
         "heldout_deviance_per_pool_constant_baseline": deviance_per_pool(
             n[hold], k[hold], np.full(int(hold.sum()), rate0)),
         "caveats": "Gaussian empirical-logit PoC on a 12k-pool subsample, "
-                   "unthresholded 8x8 coarse seed, fixed tau, GEV=0.35; "
+                   "unthresholded 16x16 coarse seed, per-depth EM tau, GEV=0.35; "
                    "not the production binomial pipeline.",
     }
     obs = binned(x, y, z, w)
