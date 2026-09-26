@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BIN=${1:-"$ROOT/build-release/decision_mesh"}
+BIN=${1:-"$ROOT/build-release/rect_mesh"}
 MODE=${2:-bh}
 OUT=${3:-"$ROOT/benchmark-output/$MODE"}
 SEED=${4:-7}
