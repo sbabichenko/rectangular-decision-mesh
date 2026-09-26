@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# The pure-Python port as an engine executable: DMESH_BIN=scripts/pyrect_engine runs every fit
+# through `python3 -m pyrect` with the same command line and environment as build-release/rect_mesh
+# (the triangular repo's benchmark harness, bench.base_fits, takes it unchanged). One BLAS thread:
+# the port's linear algebra is small, and OpenBLAS sums differently with a different thread count.
+export OPENBLAS_NUM_THREADS=1
+export PYTHONPATH="$(cd "$(dirname "$0")/.." && pwd)${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m pyrect "$@"
