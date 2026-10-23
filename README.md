@@ -8,7 +8,8 @@ mean-neutral pool effect, a hierarchical surplus basis on an adaptively refined 
 empirical-null FDR gate that decides where to refine.
 
 **Status (2026-09-23):** a working estimator in C++ (`core/`, the reference) and in Python
-(`pyrect/`, the port, agreeing with the binary to 1e-9). It runs the triangular mesh's current
+(`pyrect/`, the port, agreeing with the binary to 1e-9). The C++ engine is out of the tree for
+now (2026-10-23; it is in the history up to 190e8db); this tree is the Python port alone. It runs the triangular mesh's current
 estimator with a rectangular geometry underneath. On the 2020 year battery it matches the
 triangular binary on single-issuer fits (held-out deviance -0.24%, se 0.14%), and it is level when
 the newest cohorts are held out and in the combined predictor, fitting in 55-65% of the time and
@@ -17,12 +18,8 @@ See [`docs/RECT_ESTIMATOR.md`](docs/RECT_ESTIMATOR.md).
 
 ## Running it
 
-    cmake -S core -B build-release -DCMAKE_BUILD_TYPE=Release && cmake --build build-release -j
-    ctest --test-dir build-release                      # the geometry contracts
-    DMESH_DATA=design.csv DMESH_DUMP=out/run DMESH_SPLIT=1 ./build-release/rect_mesh 7
-
-    python3 -m pyrect 7                                 # the port, same environment and dumps
-    python3 -m pytest -q pyrect/tests                   # the port against the binary
+    DMESH_DATA=design.csv DMESH_DUMP=out/run DMESH_SPLIT=1 python3 -m pyrect 7
+    python3 -m pytest -q pyrect/tests                   # the checks against the binary skip without one
 
     python3 -m analysis.starplot <run dir> <design.csv> --vertex <id> --out star.png   # one admission, drawn
     python3 -m analysis.starplot <run dir> <design.csv> --pick giant|keff|surplus --held-out \
@@ -33,19 +30,14 @@ See [`docs/RECT_ESTIMATOR.md`](docs/RECT_ESTIMATOR.md).
 The design file is the triangular engine's (`wala,wac,n0,k_term[,offset][,pool_id]`), as are the
 environment (`DMESH_DATA`, `DMESH_DUMP`, `DMESH_SPLIT`, `DMESH_SPLIT_MASK`, `DMESH_BASELINE`,
 `DMESH_Q`, `DMESH_LEVEL_GROUPS`, `OMP_NUM_THREADS`) and the dumps the benchmark reads, so the triangular
-repo's harness runs either engine unchanged:
+repo's harness runs the port unchanged:
 
     cd ../triangular-decision-mesh
-    DMESH_BIN=../rectangular-decision-mesh/build-release/rect_mesh python3 -m bench.base_fits 1 2 3 --month 202002
-    DMESH_BIN=../rectangular-decision-mesh/scripts/pyrect_engine  python3 -m bench.base_fits 1 --month 202002
-    scripts/run_leveled_benchmark.sh ../rectangular-decision-mesh/build-release/rect_mesh out 1   # the combined predictor
+    DMESH_BIN=../rectangular-decision-mesh/scripts/pyrect_engine python3 -m bench.base_fits 1 --month 202002
 
 ## Contents
 
-- `core/`: the C++ estimator. `mesh/rect.*` is the rectangular geometry; `estimator/` and `fit/`
-  are the triangular repo's estimator and gate (copied 2026-09-22) with the mesh-facing parts
-  rewritten. `tests/test_rect_geometry.cpp` checks the geometry's contracts.
-- `pyrect/`: the Python port (`pyrect/README.md`).
+- `pyrect/`: the estimator in Python (`pyrect/README.md`).
 - `analysis/starplot.py`: star plots, the triangular repo's tool with the rectangular geometry
   underneath (the coefficient's hierarchical column on its cells, the two sections along and
   across its parent segment, the accounting card); it reads the binary's and the port's dumps
@@ -56,6 +48,5 @@ repo's harness runs either engine unchanged:
 - `docs/GEOMETRY_DESIGN.md`, `docs/FDR_PORT.md`, `docs/REGRESSION_DESIGN.md`,
   `docs/ESTIMATOR_LESSONS.md`: the August design documents (the geometry note is what was built,
   with the departures listed in RECT_ESTIMATOR.md).
-- `poc/`: the August proof of concept (Python geometry, gate experiments, the Ginnie first look);
-  its C++ core is kept in `poc/core_2026-08-13/`.
+- `poc/`: the August proof of concept (Python geometry, gate experiments, the Ginnie first look).
 - `data/`: the frozen Ginnie and SMM benchmark inputs, copied from the triangular repo.
