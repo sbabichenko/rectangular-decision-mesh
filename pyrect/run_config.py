@@ -9,6 +9,7 @@ class FitConfig:
     def __init__(self):
         self.heldout_split = False
         self.baseline = "training"
+        self.fdr_level = 0.40      # the gate's false discovery rate (DMESH_Q); 0.10 before 2026-09-29
 
 
 class OutputConfig:
@@ -50,6 +51,20 @@ def _parse_int(text, label):
     return v
 
 
+_DECIMAL = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$", re.ASCII)
+
+
+def _parse_float(text, label):
+    """The binary's parse_number<double>: strtod on the whole token, finite (decimal forms)."""
+    token = text.lstrip(" \t\n\r\x0b\x0c")          # strtod skips leading whitespace, not trailing
+    if not _DECIMAL.match(token):
+        raise RuntimeError(f"invalid {label}: {text}")
+    v = float(token)
+    if v != v or v in (float("inf"), float("-inf")):
+        raise RuntimeError(f"invalid {label}: {text}")
+    return v
+
+
 def parse_run_config(argv):
     config = RunConfig()
     args = argv[1:]
@@ -73,4 +88,9 @@ def parse_run_config(argv):
             raise RuntimeError(f"DMESH_DUMP directory does not exist: {parent}")
         if not os.access(parent, os.W_OK):
             raise RuntimeError(f"DMESH_DUMP directory is not writable: {parent}")
+    q = _env_string("DMESH_Q")
+    if q is not None:
+        config.fit.fdr_level = _parse_float(q, "DMESH_Q")
+        if not (0.0 < config.fit.fdr_level < 1.0):
+            raise RuntimeError("DMESH_Q must be strictly between 0 and 1")
     return config

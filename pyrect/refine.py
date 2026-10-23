@@ -23,7 +23,7 @@ K_PRE_REFINE_LEVELS_AXIS3 = 2    # three dimensions: 8 x 8 x 4, the third axis s
 K_BACKBONE_DEPTH = 1             # pre-refined vertices this deep start as free coefficients
 K_MINIMUM_CELL_CAP = 600         # cell budget: max(this, N // K_ROWS_PER_CELL)
 K_ROWS_PER_CELL = 24             # about one cell per this many rows: the data-density ceiling
-K_FDR_LEVEL = 0.10               # the gate's false discovery rate
+K_FDR_LEVEL = 0.40               # the gate's default false discovery rate (DMESH_Q overrides); 0.10 before 2026-09-29
 K_MAX_ROUNDS = 80
 K_STALL_LIMIT = 3                # consecutive rounds admitting nothing
 K_REFRESH_PERIOD = 3             # rounds between refits of the whole surface
@@ -145,7 +145,7 @@ def report_calibration(rnd, scored, lfdr_result, lindsey_fallback, kk, engine):
     engine.note_round(len(scored.z), kk, lfdr_result.status, lfdr_result.empirical_sd, lfdr_result.empirical_mean)
 
 
-def run_gate_rounds(mesh, cell_cap, engine, census, records=None):
+def run_gate_rounds(mesh, cell_cap, engine, census, records=None, fdr_level=K_FDR_LEVEL):
     """The gate rounds to convergence: score the frontier, calibrate an empirical null, select
     under it, admit. The loop ends when the cell budget is spent, when a round finds no
     scoreable candidate, or after K_STALL_LIMIT consecutive rounds that admit nothing."""
@@ -184,7 +184,7 @@ def run_gate_rounds(mesh, cell_cap, engine, census, records=None):
             std_sort(op, lambda a, b: pv[a] < pv[b] or (pv[a] == pv[b] and a < b))   # ties by index, as the binary
             kbh = 0
             for i in range(len(op)):
-                if pv[op[i]] <= K_FDR_LEVEL * (i + 1) / len(op):
+                if pv[op[i]] <= fdr_level * (i + 1) / len(op):
                     kbh = i + 1
             direct_bh_order = op
             direct_bh_k = kbh
@@ -219,7 +219,7 @@ def run_gate_rounds(mesh, cell_cap, engine, census, records=None):
             kk = 0
             for i in range(len(order)):
                 cum += lf[order[i]]
-                if cum / (i + 1) <= K_FDR_LEVEL:
+                if cum / (i + 1) <= fdr_level:
                     kk = i + 1
                 else:
                     break
@@ -273,7 +273,7 @@ def refine(config, dataset, engine):
     cell_cap = max(K_MINIMUM_CELL_CAP, N // K_ROWS_PER_CELL)
     census = CandidateCensus()
     candidate_rows = []
-    run_gate_rounds(mesh, cell_cap, engine, census, candidate_rows)
+    run_gate_rounds(mesh, cell_cap, engine, census, candidate_rows, config.fit.fdr_level)
     engine.refit(mesh)
     free_count = sum(1 for v in mesh.vertices if v.free_coefficient)
     out("refinement done: cells %d, vertices %d, free %d  [%.1f s]\n" % (mesh.leaf_count(), len(mesh.vertices), free_count, time.monotonic() - t_start))

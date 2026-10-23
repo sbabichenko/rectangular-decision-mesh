@@ -10,8 +10,10 @@ struct FitConfig {
     // logit, added to any offset column. "external": the offset column already
     // carries the whole baseline logit and enters unchanged; nothing is added.
     std::string baseline = "training";
-    // The gate's false discovery rate (DMESH_Q), strictly between 0 and 1.
-    double fdr_level = 0.10;
+    // The gate's false discovery rate (DMESH_Q), strictly between 0 and 1. 0.40 since
+    // 2026-09-29, as the triangular engine (year battery there: -0.61% held-out deviance against
+    // 0.10 on the random split, -0.55% on the cohort folds).
+    double fdr_level = 0.40;
 };
 
 struct OutputConfig {

@@ -2,7 +2,7 @@
 
 The rectangular mesh now runs the triangular mesh's current estimator end to end: the
 centred-score surface fit with mean-neutral pool effects, the pool-variance steps, the
-Lindsey empirical null with linear binning, the lfdr running-mean cutoff at FDR 0.10, and the
+Lindsey empirical null with linear binning, the lfdr running-mean cutoff at FDR 0.40 (0.10 before 2026-09-29), and the
 EM depth variance. `core/` is that estimator with a rectangular geometry underneath; the
 August proof of concept is in `poc/core_2026-08-13/`.
 
